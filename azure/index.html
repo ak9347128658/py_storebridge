@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Azure Blob · py_storebridge</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10131a;
+      --card: #1a1f2b;
+      --line: #2c3444;
+      --text: #e8ebf2;
+      --muted: #9aa3b5;
+      --ok: #7dcea0;
+      --bad: #f07178;
+      --accent: #f0b429;
+    }
+    body[data-provider="azure"] { --accent: #5aa2ff; }
+    body[data-provider="gcp"] { --accent: #3dd68c; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.5 "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header, main { width: min(1100px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 28px 0 8px; }
+    h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -0.03em; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    .lede, .hint, footer { color: var(--muted); }
+    .accent { color: var(--accent); }
+    .status {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0 8px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: #141924;
+    }
+    .pill.ok { color: var(--ok); border-color: #245c40; }
+    .pill.bad { color: var(--bad); border-color: #6b3036; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+    label { display: block; margin: 10px 0 4px; color: var(--muted); }
+    input[type="text"], input[type="file"], select {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #10141d;
+      color: var(--text);
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; margin-top: 10px; }
+    button, .linkish {
+      background: var(--accent);
+      color: #16120a;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: 650;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    button.quiet, a.quiet {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    tr.selected { background: #242b3b; }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #10141d;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 320px;
+      overflow: auto;
+    }
+    .preview-image {
+      display: block;
+      max-width: 100%;
+      max-height: 520px;
+      margin-top: 8px;
+      border-radius: 10px;
+      background: #0c0f16;
+      object-fit: contain;
+    }
+    .message { min-height: 1.4em; margin-top: 10px; }
+    .message.bad { color: var(--bad); }
+    .message.ok { color: var(--ok); }
+    footer { padding: 8px 0 28px; }
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body data-provider="azure">
+  <header>
+    <h1 id="title">Azure Blob</h1>
+    <p class="lede" id="lede">py_storebridge test. Upload a file, read it back, and keep the file in <span class="accent">data/uploads.json</span>.</p>
+    <div class="status" id="status" aria-live="polite"></div>
+  </header>
+  <main>
+    <div class="grid">
+      <section>
+        <h2>Public upload</h2>
+        <p class="hint">Uses the public client. Objects are stored under <code>public/</code>.</p>
+        <form data-visibility="public">
+          <label for="public-file">File</label>
+          <input id="public-file" type="file" required>
+          <div class="row"><button type="submit">Upload public</button></div>
+          <p class="message" data-message></p>
+        </form>
+      </section>
+      <section>
+        <h2>Private upload</h2>
+        <p class="hint">Uses the private client. Objects are stored under <code>private/</code>. Reads use a signed URL.</p>
+        <form data-visibility="private">
+          <label for="private-file">File</label>
+          <input id="private-file" type="file" required>
+          <div class="row"><button type="submit">Upload private</button></div>
+          <p class="message" data-message></p>
+        </form>
+      </section>
+    </div>
+
+    <section>
+      <h2>Uploaded files</h2>
+      <p class="hint" id="catalog-path">Saved in data/uploads.json after the server reads the object back.</p>
+      <table>
+        <thead>
+          <tr><th>Visibility</th><th>File</th><th>Size</th><th>Read-back</th><th></th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="hint" id="empty">No uploads yet.</p>
+      <h3>Preview</h3>
+      <div id="preview" class="hint">Choose Preview on a row to see the file.</div>
+      <details>
+        <summary>Show data/uploads.json</summary>
+        <pre id="catalog-json">[]</pre>
+      </details>
+    </section>
+
+    <section>
+      <h2>Migrate</h2>
+      <p class="hint">Runs <code>transfer()</code> for objects that are already stored. Dry run is on until you turn it off. Delete source removes the object from this provider after a successful copy.</p>
+      <form id="migrate-form">
+        <div class="grid">
+          <div>
+            <label for="target">Destination</label>
+            <select id="target"></select>
+          </div>
+          <div>
+            <label for="scope">What to copy</label>
+            <select id="scope">
+              <option value="public">Public prefix</option>
+              <option value="private">Private prefix</option>
+              <option value="both">Public and private</option>
+            </select>
+          </div>
+        </div>
+        <label for="source-key">One object key (optional)</label>
+        <input id="source-key" type="text" placeholder="public/abc_notes.txt" autocomplete="off">
+        <div class="row">
+          <label><input id="dry-run" type="checkbox" checked> Dry run</label>
+          <label><input id="skip-existing" type="checkbox" checked> Skip existing</label>
+          <label><input id="delete-source" type="checkbox"> Delete source after copy</label>
+        </div>
+        <div class="row"><button type="submit">Run migration</button></div>
+        <p class="message" id="migrate-message"></p>
+      </form>
+      <pre id="migrate-result" hidden></pre>
+    </section>
+  </main>
+  <footer>Local test only. This server binds to 127.0.0.1. Setup steps are in <span id="docs">docs/azure.md</span>.</footer>
+  <script>
+    const state = { uploads: [], selected: null };
+
+    function setMessage(node, text, kind) {
+      node.textContent = text || "";
+      node.className = "message" + (kind ? " " + kind : "");
+    }
+
+    async function readJson(response) {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || response.statusText);
+      }
+      return payload;
+    }
+
+    function pill(text, kind) {
+      const span = document.createElement("span");
+      span.className = "pill" + (kind ? " " + kind : "");
+      span.textContent = text;
+      return span;
+    }
+
+    async function loadInfo() {
+      const info = await readJson(await fetch("/api/info"));
+      document.title = info.name + " · py_storebridge";
+      document.getElementById("title").textContent = info.name;
+      document.getElementById("lede").innerHTML =
+        info.library + " · provider <code>" + info.library_provider + "</code>. Upload a file, read it back, and keep it in <span class='accent'>data/uploads.json</span>.";
+      document.getElementById("docs").textContent = info.docs;
+      const target = document.getElementById("target");
+      target.innerHTML = "";
+      for (const item of info.migration_targets) {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.label;
+        target.appendChild(option);
+      }
+      const all = document.createElement("option");
+      all.value = "all";
+      all.textContent = "All other providers";
+      target.appendChild(all);
+    }
+
+    async function loadHealth() {
+      const health = await readJson(await fetch("/api/health"));
+      const status = document.getElementById("status");
+      status.innerHTML = "";
+      status.appendChild(pill("library " + health.library));
+      status.appendChild(pill(
+        health.public_ready ? "public credentials ready" : "public missing: " + health.missing_public.join(", "),
+        health.public_ready ? "ok" : "bad"
+      ));
+      status.appendChild(pill(
+        health.private_ready ? "private credentials ready" : "private missing: " + health.missing_private.join(", "),
+        health.private_ready ? "ok" : "bad"
+      ));
+    }
+
+    function isImage(record) {
+      const type = String(record.content_type || "").toLowerCase();
+      if (type.startsWith("image/")) return true;
+      return /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i.test(record.filename || record.key || "");
+    }
+
+    function imageType(record) {
+      const type = String(record.content_type || "").toLowerCase();
+      if (type.startsWith("image/")) return type;
+      const name = String(record.filename || record.key || "").toLowerCase();
+      if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+      if (name.endsWith(".gif")) return "image/gif";
+      if (name.endsWith(".webp")) return "image/webp";
+      if (name.endsWith(".svg")) return "image/svg+xml";
+      if (name.endsWith(".bmp")) return "image/bmp";
+      if (name.endsWith(".avif")) return "image/avif";
+      if (name.endsWith(".ico")) return "image/x-icon";
+      return "image/png";
+    }
+
+    function imageSource(record, fresh) {
+      if (!fresh && record.content_base64) {
+        return "data:" + imageType(record) + ";base64," + record.content_base64;
+      }
+      if (!fresh && record.content_text && imageType(record) === "image/svg+xml") {
+        return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(record.content_text);
+      }
+      return "/api/download?inline=1&key=" + encodeURIComponent(record.key) +
+        "&visibility=" + encodeURIComponent(record.visibility) +
+        (fresh ? "&t=" + Date.now() : "");
+    }
+
+    function appendImage(parent, record, fresh) {
+      const img = document.createElement("img");
+      img.className = "preview-image";
+      img.alt = record.filename || "Uploaded image";
+      img.src = imageSource(record, fresh);
+      parent.appendChild(img);
+    }
+
+    function renderPreview(record) {
+      const preview = document.getElementById("preview");
+      preview.className = "";
+      preview.innerHTML = "";
+      if (!record) {
+        preview.className = "hint";
+        preview.textContent = "Choose Preview on a row to see the file.";
+        return;
+      }
+      const meta = document.createElement("p");
+      meta.textContent = record.filename + " · " + record.content_type;
+      preview.appendChild(meta);
+      if (isImage(record)) {
+        appendImage(preview, record, false);
+      } else if (record.content_text !== null && record.content_text !== undefined) {
+        const pre = document.createElement("pre");
+        pre.textContent = record.content_text;
+        preview.appendChild(pre);
+      } else if (record.content_omitted) {
+        const note = document.createElement("p");
+        note.className = "hint";
+        note.textContent = "This file is too large to embed. Download reads it from the provider.";
+        preview.appendChild(note);
+      } else {
+        const note = document.createElement("p");
+        note.className = "hint";
+        note.textContent = "This file is not an image. Use Download to open it.";
+        preview.appendChild(note);
+      }
+      const actions = document.createElement("div");
+      actions.className = "row";
+      const read = document.createElement("button");
+      read.type = "button";
+      read.className = "quiet";
+      read.textContent = "Read again from provider";
+      read.addEventListener("click", () => readAgain(record));
+      const download = document.createElement("a");
+      download.className = "quiet";
+      download.textContent = "Download";
+      download.href = "/api/download?key=" + encodeURIComponent(record.key) + "&visibility=" + encodeURIComponent(record.visibility);
+      const useKey = document.createElement("button");
+      useKey.type = "button";
+      useKey.className = "quiet";
+      useKey.textContent = "Use key in migration";
+      useKey.addEventListener("click", () => {
+        document.getElementById("source-key").value = record.key;
+        document.getElementById("scope").value = record.visibility;
+      });
+      actions.append(read, download, useKey);
+      preview.appendChild(actions);
+      const fresh = document.createElement("div");
+      fresh.id = "fresh";
+      preview.appendChild(fresh);
+    }
+
+    async function readAgain(record) {
+      const fresh = document.getElementById("fresh");
+      fresh.innerHTML = "";
+      if (isImage(record)) {
+        const title = document.createElement("p");
+        title.textContent = "Fresh read from the provider";
+        fresh.appendChild(title);
+        appendImage(fresh, record, true);
+        return;
+      }
+      try {
+        const payload = await readJson(await fetch(
+          "/api/read?key=" + encodeURIComponent(record.key) + "&visibility=" + encodeURIComponent(record.visibility)
+        ));
+        const title = document.createElement("p");
+        title.textContent = "Fresh read from the provider" +
+          (payload.url ? " · " + payload.url : "") +
+          (payload.url_error ? " · " + payload.url_error : "");
+        const live = document.createElement("pre");
+        live.textContent = payload.content_text != null
+          ? payload.content_text
+          : "Read " + payload.read_back_size + " bytes from the provider.";
+        fresh.append(title, live);
+      } catch (error) {
+        const note = document.createElement("p");
+        note.className = "message bad";
+        note.textContent = error.message;
+        fresh.appendChild(note);
+      }
+    }
+
+    function renderRows() {
+      const body = document.getElementById("rows");
+      body.innerHTML = "";
+      document.getElementById("empty").hidden = state.uploads.length > 0;
+      for (const record of state.uploads) {
+        const tr = document.createElement("tr");
+        if (state.selected && state.selected.id === record.id) tr.className = "selected";
+        tr.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+        tr.children[0].textContent = record.visibility;
+        tr.children[1].textContent = record.filename;
+        tr.children[2].textContent = String(record.size);
+        tr.children[3].textContent = record.read_back_matches ? "matches" : "mismatch";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "quiet";
+        button.textContent = "Preview";
+        button.addEventListener("click", () => {
+          state.selected = record;
+          renderRows();
+          renderPreview(record);
+        });
+        tr.children[4].appendChild(button);
+        body.appendChild(tr);
+      }
+    }
+
+    async function loadUploads() {
+      const catalog = await readJson(await fetch("/api/uploads"));
+      state.uploads = catalog.uploads || [];
+      if (state.selected) {
+        state.selected = state.uploads.find((item) => item.id === state.selected.id) || state.uploads[0] || null;
+      }
+      renderRows();
+      renderPreview(state.selected);
+      const raw = await fetch("/api/catalog-file");
+      document.getElementById("catalog-json").textContent = await raw.text();
+    }
+
+    document.querySelectorAll("form[data-visibility]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = form.querySelector("[data-message]");
+        const button = form.querySelector("button");
+        const input = form.querySelector("input[type=file]");
+        const body = new FormData();
+        body.append("visibility", form.dataset.visibility);
+        body.append("file", input.files[0]);
+        button.disabled = true;
+        setMessage(message, "Uploading and reading the file back…");
+        try {
+          const payload = await readJson(await fetch("/api/upload", { method: "POST", body }));
+          const record = payload.record;
+          state.selected = record;
+          setMessage(
+            message,
+            record.read_back_matches
+              ? "Stored " + record.key + ". Read-back matches the upload."
+              : "Stored " + record.key + ", but the read-back bytes differ.",
+            record.read_back_matches ? "ok" : "bad"
+          );
+          input.value = "";
+          await loadUploads();
+          renderPreview(record);
+        } catch (error) {
+          setMessage(message, error.message, "bad");
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+
+    document.getElementById("migrate-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const message = document.getElementById("migrate-message");
+      const button = event.target.querySelector("button");
+      const deleteSource = document.getElementById("delete-source").checked;
+      if (deleteSource && !window.confirm("Delete the source objects after they copy?")) {
+        return;
+      }
+      button.disabled = true;
+      setMessage(message, "Running transfer()…");
+      try {
+        const payload = await readJson(await fetch("/api/migrate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: document.getElementById("target").value,
+            visibility: document.getElementById("scope").value,
+            source_key: document.getElementById("source-key").value.trim(),
+            dry_run: document.getElementById("dry-run").checked,
+            skip_existing: document.getElementById("skip-existing").checked,
+            delete_source: deleteSource
+          })
+        }));
+        const box = document.getElementById("migrate-result");
+        box.hidden = false;
+        box.textContent = JSON.stringify(payload.results, null, 2);
+        const failed = payload.results.reduce((sum, item) => sum + (item.failed || 0), 0);
+        setMessage(message, failed ? "Finished with failed objects." : "Migration finished.", failed ? "bad" : "ok");
+      } catch (error) {
+        setMessage(message, error.message, "bad");
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    loadInfo().then(loadHealth).then(loadUploads).catch((error) => {
+      document.getElementById("status").appendChild(pill(error.message, "bad"));
+    });
+  </script>
+</body>
+</html>
