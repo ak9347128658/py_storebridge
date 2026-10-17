@@ -1,6 +1,6 @@
 # py_storebridge
 
-**A unified, production-ready cloud storage SDK for Python.**
+**A unified, production-ready cloud and on-premises storage SDK for Python.**
 
 Switch storage providers by changing a single config line — no code changes required.
 
@@ -10,7 +10,7 @@ Python port of [storebridge](https://www.npmjs.com/package/storebridge) (Node.js
 
 ## Features
 
-- **10 storage providers** — one consistent API
+- **11 storage providers** — ten cloud providers plus on-premises disk or your own S3-compatible service
 - **Pydantic v2** — every config object and public operation is validated
 - **Retry system** — exponential backoff with full jitter
 - **Middleware** — composable upload pipeline (metadata injection, key prefixes, …)
@@ -39,8 +39,9 @@ Python port of [storebridge](https://www.npmjs.com/package/storebridge) (Node.js
 | Supabase Storage | `supabase` | `pip install py_storebridge[supabase]` |
 | Firebase Storage | `firebase` | `pip install py_storebridge[firebase]` |
 | Appwrite Storage | `appwrite` | `pip install py_storebridge[appwrite]` |
+| On-premises | `onprem` | `pip install py_storebridge` for local disk. `pip install py_storebridge[onprem]` for MinIO, Ceph, Garage, or SeaweedFS |
 
-Provider SDKs are optional extras. The core package depends only on **Pydantic**.
+Provider SDKs are optional extras. The core package depends only on **Pydantic**. The on-premises filesystem engine has no extra dependency.
 
 ```bash
 pip install py_storebridge
@@ -52,20 +53,20 @@ pip install py_storebridge[all]
 
 ## Feature matrix
 
-| Feature | S3 | R2 | GCS | Azure | Spaces | B2 | MinIO | Supabase | Firebase | Appwrite |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Upload | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Delete | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Exists | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Metadata | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| List | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Signed URLs | yes | yes | yes | yes | yes | yes | yes | yes | yes | limited |
-| Copy / move | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Stream upload | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Multipart | native | native | fallback | native blocks | native | native | native | fallback | fallback | fallback |
-| ACL / visibility | yes | limited | yes | limited | yes | limited | limited | yes | yes | yes |
-| CDN / custom domain | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| **Transfer to another provider** | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Feature | S3 | R2 | GCS | Azure | Spaces | B2 | MinIO | Supabase | Firebase | Appwrite | On-prem |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Upload | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Delete | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Exists | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Metadata | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| List | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Signed URLs | yes | yes | yes | yes | yes | yes | yes | yes | yes | limited | yes |
+| Copy / move | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Stream upload | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Multipart | native | native | fallback | native blocks | native | native | native | fallback | fallback | fallback | disk or native |
+| ACL / visibility | yes | limited | yes | limited | yes | limited | limited | yes | yes | yes | yes |
+| CDN / custom domain | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| **Transfer to another provider** | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 
 ---
 
@@ -416,6 +417,75 @@ storage = create_storage({
     },
 })
 ```
+
+### On-premises
+
+One provider covers a disk on this machine, a NAS mount, and an S3-compatible service you already run (MinIO, Ceph RGW, Garage, SeaweedFS). Private and public visibility work in every mode.
+
+| Situation | What to set |
+| --- | --- |
+| No storage service installed | `engine` omitted or `"auto"`. Files go to `root` (default `.py_storebridge`) |
+| Browsers need HTTP links | `serve: true`. Public objects are readable. Private objects need a signed URL |
+| Existing MinIO, Ceph, Garage, or SeaweedFS | `endpoint`, `access_key`, `secret_key` |
+| MinIO binary or Docker is installed, but nothing is listening | `install: true` |
+| Fetch the official MinIO binary | `install: true`, `allow_download: true` |
+| Air-gapped machine | `engine: "filesystem"`. Nothing is downloaded |
+
+`install=true` only starts a service on localhost. A remote endpoint that is down is an error, not a silent switch to local disk. `engine="filesystem"` never installs a service. The embedded server binds to `127.0.0.1` unless you set `host`.
+
+```python
+# No service required. Private by default.
+storage = create_storage({
+    "provider": "onprem",
+    "credentials": {
+        "bucket": "app",
+        "root": "/var/lib/py_storebridge",
+        "signing_secret": "replace-with-a-long-random-string",
+    },
+    "visibility": "private",
+})
+
+storage.upload(key="users/profile.png", file=image_bytes, visibility="private")
+storage.upload(key="assets/logo.png", file=logo_bytes, visibility="public")
+url = storage.get_signed_url("users/profile.png", expires_in=900)
+
+# Serve public files and honor signed URLs from this process.
+served = create_storage({
+    "provider": "onprem",
+    "credentials": {
+        "bucket": "app",
+        "root": "/var/lib/py_storebridge",
+        "serve": True,
+        "serve_port": 8787,
+        "signing_secret": "replace-with-a-long-random-string",
+    },
+})
+
+# Existing on-premises S3 API. Same code for MinIO, Ceph, Garage, or SeaweedFS.
+remote = create_storage({
+    "provider": "onprem",
+    "credentials": {
+        "bucket": "app",
+        "endpoint": "http://minio.internal:9000",
+        "access_key": "…",
+        "secret_key": "…",
+    },
+})
+
+# Nothing is listening on localhost:9000. Start MinIO if Docker or a binary is available.
+local_minio = create_storage({
+    "provider": "onprem",
+    "credentials": {
+        "bucket": "app",
+        "root": "/var/lib/py_storebridge",
+        "engine": "minio",
+        "install": True,
+        "install_method": "auto",  # binary on PATH, else Docker; download only if allow_download
+    },
+})
+```
+
+Generated MinIO credentials are written to `{root}/engine.json` with mode `0600` on Unix. Set `signing_secret` yourself when more than one app process verifies signed URLs. Call `storage.provider.close()` to stop the embedded file server.
 
 ### Supabase Storage
 

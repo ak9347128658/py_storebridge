@@ -40,5 +40,8 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Local on-premises data directory
+.py_storebridge/
+
 # Packaging
 pip-wheel-metadata/

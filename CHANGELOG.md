@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — 2026-10-17
+
+### On-premises storage
+
+- New `onprem` provider for private and public files on your own machines
+- `engine='auto'` stores on the local disk when no storage service is configured. No extra package and no download
+- Point `endpoint` at an existing S3-compatible service: MinIO, Ceph RGW, Garage, or SeaweedFS (`pip install py_storebridge[onprem]`)
+- `install=true` bootstraps MinIO on this machine when the endpoint is down. Auto mode uses a MinIO binary on PATH, then Docker. Set `allow_download=true` to fetch the official MinIO binary
+- `engine='filesystem'` never installs a service. `serve=true` exposes public files and HMAC signed URLs from the Python process
+- Filesystem keys are encoded so Windows reserved names and path segments cannot escape the bucket directory
+
 ## 1.0.0 — 2026-03-25
 
 First public release of **py_storebridge**, the Python port of [storebridge](https://www.npmjs.com/package/storebridge).

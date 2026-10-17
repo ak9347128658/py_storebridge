@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
@@ -174,6 +175,132 @@ class FirebaseCredentials(_Model):
     custom_domain: Optional[str] = Field(default=None, alias="customDomain")
 
 
+class OnPremEngine(str, Enum):
+    """Where on-premises bytes are stored."""
+
+    AUTO = "auto"
+    FILESYSTEM = "filesystem"
+    MINIO = "minio"
+    S3 = "s3"
+
+
+class OnPremInstallMethod(str, Enum):
+    """How to bootstrap MinIO when ``install`` is true and nothing is listening."""
+
+    AUTO = "auto"
+    DOCKER = "docker"
+    BINARY = "binary"
+    NONE = "none"
+
+
+_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+
+
+class OnPremCredentials(_Model):
+    """Credentials for local disk or an on-premises S3-compatible service.
+
+    An empty object is valid. ``engine='auto'`` then stores files on the local
+    filesystem under ``root`` (default ``.py_storebridge`` in the working directory).
+    """
+
+    bucket: str = "default"
+    root: Optional[str] = None
+    engine: OnPremEngine = OnPremEngine.AUTO
+    region: str = "us-east-1"
+
+    endpoint: Optional[str] = None
+    end_point: Optional[str] = Field(default=None, alias="endPoint")
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+    use_ssl: bool = Field(default=False, alias="useSSL")
+    access_key: Optional[str] = Field(default=None, alias="accessKey")
+    secret_key: Optional[str] = Field(default=None, alias="secretKey")
+    force_path_style: bool = Field(default=True, alias="forcePathStyle")
+    supports_acl: bool = Field(default=False, alias="supportsAcl")
+    create_bucket: bool = Field(default=True, alias="createBucket")
+
+    signing_secret: Optional[str] = Field(default=None, alias="signingSecret")
+    base_url: Optional[str] = Field(default=None, alias="baseUrl")
+    serve: bool = False
+    host: str = "127.0.0.1"
+    serve_port: int = Field(default=8787, ge=0, le=65535, alias="servePort")
+    cors_origin: Optional[str] = Field(default=None, alias="corsOrigin")
+    max_upload_bytes: Optional[int] = Field(default=None, ge=1, alias="maxUploadBytes")
+
+    install: bool = False
+    install_method: OnPremInstallMethod = Field(default=OnPremInstallMethod.AUTO, alias="installMethod")
+    allow_download: bool = Field(default=False, alias="allowDownload")
+    minio_image: str = Field(default="minio/minio:latest", alias="minioImage")
+    minio_binary_url: Optional[str] = Field(default=None, alias="minioBinaryUrl")
+    data_dir: Optional[str] = Field(default=None, alias="dataDir")
+    console_port: Optional[int] = Field(default=None, ge=1, le=65535, alias="consolePort")
+    container_name: Optional[str] = Field(default=None, alias="containerName")
+    probe_timeout: float = Field(default=1.5, gt=0, le=60, alias="probeTimeout")
+    startup_timeout: float = Field(default=30, gt=0, le=300, alias="startupTimeout")
+
+    cdn_url: Optional[str] = Field(default=None, alias="cdnUrl")
+    custom_domain: Optional[str] = Field(default=None, alias="customDomain")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        pairs = (
+            ("access_key_id", "access_key", "accessKey"),
+            ("accessKeyId", "access_key", "accessKey"),
+            ("secret_access_key", "secret_key", "secretKey"),
+            ("secretAccessKey", "secret_key", "secretKey"),
+        )
+        for source, target, alias in pairs:
+            if source not in payload:
+                continue
+            if target in payload or alias in payload:
+                payload.pop(source, None)
+            else:
+                payload[target] = payload.pop(source)
+        return payload
+
+    @field_validator("bucket")
+    @classmethod
+    def _bucket(cls, value: str) -> str:
+        if not _BUCKET_NAME.match(value) or ".." in value:
+            raise ValueError(
+                "bucket must be 3-63 characters of lowercase letters, digits, dots, or hyphens"
+            )
+        return value
+
+    @field_validator("endpoint", "base_url", "cdn_url", "custom_domain", "minio_binary_url")
+    @classmethod
+    def _http_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return value.rstrip("/")
+
+    @field_validator("signing_secret")
+    @classmethod
+    def _secret(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and len(value) < 16:
+            raise ValueError("signing_secret must be at least 16 characters")
+        return value
+
+    @field_validator("cors_origin")
+    @classmethod
+    def _cors(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and any(char in value for char in "\r\n"):
+            raise ValueError("cors_origin must be a single line")
+        return value
+
+    @field_validator("host")
+    @classmethod
+    def _host(cls, value: str) -> str:
+        if not value or any(char in value for char in "\r\n /"):
+            raise ValueError("host must be a hostname or IP address")
+        return value
+
+
 class AppwriteCredentials(_Model):
     endpoint: str = Field(min_length=1)
     project_id: str = Field(min_length=1, alias="projectId")
@@ -246,6 +373,11 @@ class AppwriteConfig(_Shared):
     credentials: AppwriteCredentials
 
 
+class OnPremConfig(_Shared):
+    provider: Literal["onprem"] = "onprem"
+    credentials: OnPremCredentials = Field(default_factory=OnPremCredentials)
+
+
 StorageConfig = Annotated[
     Union[
         S3Config,
@@ -258,6 +390,7 @@ StorageConfig = Annotated[
         SupabaseConfig,
         FirebaseConfig,
         AppwriteConfig,
+        OnPremConfig,
     ],
     Field(discriminator="provider"),
 ]
@@ -275,6 +408,7 @@ PROVIDERS = (
     "supabase",
     "firebase",
     "appwrite",
+    "onprem",
 )
 
 

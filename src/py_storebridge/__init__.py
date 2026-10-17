@@ -1,4 +1,4 @@
-"""py_storebridge — unified cloud storage SDK for Python."""
+"""py_storebridge — unified cloud and on-premises storage SDK for Python."""
 
 from py_storebridge.client import StorageClient
 from py_storebridge.config import (
@@ -9,6 +9,9 @@ from py_storebridge.config import (
     GCSCredentials,
     LogLevel,
     MinIOCredentials,
+    OnPremCredentials,
+    OnPremEngine,
+    OnPremInstallMethod,
     PROVIDERS,
     R2Credentials,
     RetryConfig,
@@ -61,7 +64,7 @@ from py_storebridge.schemas import (
 )
 from py_storebridge.transfer import transfer
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "AppwriteCredentials",
@@ -88,6 +91,9 @@ __all__ = [
     "MissingConfigError",
     "MissingDependencyError",
     "MultipartPartResult",
+    "OnPremCredentials",
+    "OnPremEngine",
+    "OnPremInstallMethod",
     "MultipartUploadError",
     "MultipartUploadSession",
     "NetworkError",

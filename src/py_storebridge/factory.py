@@ -21,6 +21,7 @@ _PROVIDERS: Dict[str, Tuple[str, str]] = {
     "supabase": ("py_storebridge.providers.supabase", "SupabaseProvider"),
     "firebase": ("py_storebridge.providers.firebase", "FirebaseProvider"),
     "appwrite": ("py_storebridge.providers.appwrite", "AppwriteProvider"),
+    "onprem": ("py_storebridge.providers.onprem", "OnPremProvider"),
 }
 
 
